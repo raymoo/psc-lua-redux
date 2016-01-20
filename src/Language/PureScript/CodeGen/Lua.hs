@@ -39,7 +39,7 @@ import System.FilePath.Posix ((</>))
 
 -- | Creates a Lua Block returning the exports of a module in a table.
 moduleToLua :: (MonadReader Options m, MonadSupply m, MonadError MultipleErrors m) =>
-               Module Ann -> Maybe L.Block -> m L.Block
+               Module Ann -> Maybe L.Exp -> m L.Block
 moduleToLua (Module coms mn imps exps foreigns decls) foreign_ =
   rethrow (addHint (ErrorInModule mn)) $ do
     let usedNames = getNames =<< decls
@@ -51,8 +51,7 @@ moduleToLua (Module coms mn imps exps foreigns decls) foreign_ =
     luaDecls <- traverse (bindToLua mn) decls'
     optimized <- return luaDecls -- TODO: Optimizations
     let foreign' = L.LocalAssign ["_foreign"] (mkForeign <$> foreign_)
-        mkForeign block =
-          [funcall (L.EFunDef (L.FunBody [] False block)) []]
+        mkForeign exp = [exp]
         moduleBody = foreign' : luaImports ++ concat optimized
         foreignExps = intersect exps (map fst foreigns)
         standardExps = exps \\ foreignExps
@@ -195,7 +194,7 @@ valueToLua _ (Constructor (_, _, _, Just IsNewtype) _ (ProperName ctor) _) =
   in return $ L.TableConst [L.NamedField "create" create]
 valueToLua _ (Constructor _ _ (ProperName ctor) []) =
   let value = L.TableConst [L.NamedField "ctor" (L.String ctor)]
-      new = L.EFunDef $ L.FunBody [] False (L.Block [] (Just [value]))
+      new = L.EFunDef $ L.FunBody ["_"] False (L.Block [] (Just [value]))
   in return $ L.TableConst [ L.NamedField "value" value
                            , L.NamedField "new" new
                            ]
@@ -203,7 +202,7 @@ valueToLua _ (Constructor _ _ (ProperName ctor) fields) =
   let args = map identToLua fields
       constructor =
         let body = L.Block [] (Just [L.TableConst $ map (L.Field . L.String) args])
-        in L.EFunDef $ L.FunBody args False body
+        in L.EFunDef $ L.FunBody ("_" : args) False body
       create =
         let created = L.PrefixExp .
                       L.PEFunCall $
