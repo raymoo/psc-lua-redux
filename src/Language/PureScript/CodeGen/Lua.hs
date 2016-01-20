@@ -201,7 +201,9 @@ valueToLua _ (Constructor _ _ (ProperName ctor) []) =
 valueToLua _ (Constructor _ _ (ProperName ctor) fields) =
   let args = map identToLua fields
       constructor =
-        let body = L.Block [] (Just [L.TableConst $ map (L.Field . L.String) args])
+        let body =
+              L.Block []
+              (Just [L.TableConst $ L.NamedField "ctor" (L.String ctor) : map (L.Field . var) args])
         in L.EFunDef $ L.FunBody ("_" : args) False body
       create =
         let created = L.PrefixExp .
