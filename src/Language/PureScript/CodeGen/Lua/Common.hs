@@ -115,4 +115,10 @@ replace _ _ [] = []
 replace lhs rhs (x : xs) =
       (if x == lhs then rhs else x) : replace lhs rhs xs
 
-      
+
+select :: L.Exp -> L.Exp -> L.Exp
+select tab index = L.PrefixExp . L.PEVar $ L.Select (expToPexp tab) index
+
+
+selectS :: L.Exp -> String -> L.Exp
+selectS tab index = select tab (L.String index)
