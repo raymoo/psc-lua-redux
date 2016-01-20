@@ -26,6 +26,10 @@ library
                        language-lua >= 0.8.1 && < 0.9,
                        containers >= 0.5.6.2 && < 0.6,
                        mtl >= 2.2.1 && < 2.3,
-                       filepath >= 1.4 && < 1.5
+                       filepath >= 1.4 && < 1.5,
+                       time >= 1.5.0.1 && < 1.6,
+                       bytestring >= 0.10.6.0 && < 0.11,
+                       transformers >= 0.4.2.0 && < 0.5,
+                       directory >= 1.2.2.0 && < 1.3
   hs-source-dirs:      src
   default-language:    Haskell2010
