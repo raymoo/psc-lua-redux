@@ -146,7 +146,7 @@ valueToLua mn (Var (_, _, _, Just (IsConstructor _ [])) name) =
 valueToLua mn (Var (_, _, _, Just (IsConstructor _ _)) name) =
   return $ selectS (qualifiedToLua mn id name) "create"
 valueToLua mn (Accessor _ prop val) =
-  flip selectS "prop" <$> valueToLua mn val
+  flip selectS prop <$> valueToLua mn val
 valueToLua mn (ObjectUpdate _ o ps) = do
   obj <- valueToLua mn o
   sts <- traverse (sndM (valueToLua mn)) ps
