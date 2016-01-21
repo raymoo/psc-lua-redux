@@ -163,9 +163,6 @@ valueToLua mn e@App{} = do
      | length args == length fields ->
          return . L.PrefixExp . L.PEFunCall $
          L.MethodCall (expToPexp $ qualifiedToLua mn id name) "new" (L.Args args')
-   Var (_, _, _, Just IsTypeClassConstructor) name ->
-     return . L.PrefixExp . L.PEFunCall $
-     L.MethodCall (expToPexp $ qualifiedToLua mn id name) "new" (L.Args args')
    _ -> flip (foldl (\fn a -> funcall fn [a])) args' <$> valueToLua mn f
   where
     unApp :: Expr Ann -> [Expr Ann] -> (Expr Ann, [Expr Ann])
