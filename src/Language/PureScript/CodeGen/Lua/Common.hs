@@ -124,6 +124,5 @@ selectS :: L.Exp -> String -> L.Exp
 selectS tab index = select tab (string index)
 
 
--- | Hack to make string literals work properly
 string :: String -> L.Exp
 string = L.String . show
