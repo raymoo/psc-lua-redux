@@ -122,3 +122,8 @@ select tab index = L.PrefixExp . L.PEVar $ L.Select (expToPexp tab) index
 
 selectS :: L.Exp -> String -> L.Exp
 selectS tab index = select tab (L.String index)
+
+
+-- | Hack to make string literals work properly
+string :: String -> L.Exp
+string = L.String . show

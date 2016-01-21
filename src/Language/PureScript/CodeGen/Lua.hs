@@ -55,8 +55,8 @@ moduleToLua (Module coms mn imps exps foreigns decls) foreign_ =
         moduleBody = foreign' : luaImports ++ concat optimized
         foreignExps = intersect exps (map fst foreigns)
         standardExps = exps \\ foreignExps
-        expPairs = map (L.String . runIdent &&& var . identToLua) standardExps
-                   ++ map (L.String . runIdent &&& foreignIdent) foreignExps
+        expPairs = map (string . runIdent &&& var . identToLua) standardExps
+                   ++ map (string . runIdent &&& foreignIdent) foreignExps
         exps' = L.TableConst $ map (uncurry L.ExpField) expPairs
     return $ L.Block moduleBody (Just [exps'])
 
@@ -96,7 +96,7 @@ importToLua :: MonadReader Options m => M.Map ModuleName ModuleName -> ModuleNam
 importToLua mnLookup mn' = do
   path <- asks optionsRequirePath
   let mnSafe = fromMaybe (internalError "Missing value in mnLookup") $ M.lookup mn' mnLookup
-      moduleBody = funcall (var "require") [L.String pathString]
+      moduleBody = funcall (var "require") [string pathString]
       pathString = maybe id (</>) path $ runModuleName mn'
   return $
     L.LocalAssign [moduleNameToLua mnSafe] $ Just [moduleBody]
@@ -193,7 +193,7 @@ valueToLua _ (Constructor (_, _, _, Just IsNewtype) _ (ProperName ctor) _) =
       funBody = L.Block [] (Just [var "value"])
   in return $ L.TableConst [L.NamedField "create" create]
 valueToLua _ (Constructor _ _ (ProperName ctor) []) =
-  let value = L.TableConst [L.NamedField "ctor" (L.String ctor)]
+  let value = L.TableConst [L.NamedField "ctor" (string ctor)]
       new = L.EFunDef $ L.FunBody ["_"] False (L.Block [] (Just [value]))
   in return $ L.TableConst [ L.NamedField "value" value
                            , L.NamedField "new" new
@@ -203,7 +203,7 @@ valueToLua _ (Constructor _ _ (ProperName ctor) fields) =
       constructor =
         let body =
               L.Block []
-              (Just [L.TableConst $ L.NamedField "ctor" (L.String ctor) : map (L.Field . var) args])
+              (Just [L.TableConst $ L.NamedField "ctor" (string ctor) : map (L.Field . var) args])
         in L.EFunDef $ L.FunBody ("_" : args) False body
       create =
         let created = L.PrefixExp .
@@ -222,14 +222,14 @@ valueToLua _ (Constructor _ _ (ProperName ctor) fields) =
 literalToValueLua :: (MonadSupply m, MonadError MultipleErrors m, MonadReader Options m) =>
                      ModuleName -> Literal (Expr Ann) -> m L.Exp
 literalToValueLua _ (NumericLiteral ei) = pure $ L.Number . either show show $ ei
-literalToValueLua _ (StringLiteral s) = pure $ L.String s
-literalToValueLua _ (CharLiteral c) = pure $ L.String [c]
+literalToValueLua _ (StringLiteral s) = pure $ string s
+literalToValueLua _ (CharLiteral c) = pure $ string [c]
 literalToValueLua _ (BooleanLiteral b) = pure $ L.Bool b
 literalToValueLua mn (ArrayLiteral xs) =
   let mkField val = L.Field <$> valueToLua mn val
   in L.TableConst <$> traverse mkField xs
 literalToValueLua mn (ObjectLiteral ps) =
-  let mkField k v = L.ExpField (L.String k) <$> valueToLua mn v
+  let mkField k v = L.ExpField (string k) <$> valueToLua mn v
   in L.TableConst <$> traverse (uncurry mkField) ps
 
 
@@ -243,7 +243,7 @@ extendObj obj extensions = do
       lhs = L.Select (expToPexp $ var newObjName) (var "k")
       rhs = var "v"
       setNewFields = map (uncurry setField) extensions
-      setField k v = L.Assign [L.Select (expToPexp $ var newObjName) (L.String k)] [v]
+      setField k v = L.Assign [L.Select (expToPexp $ var newObjName) (string k)] [v]
       fun = L.EFunDef . L.FunBody [newObjName] False $ funBody
       funBody = L.Block (newObj : copyObj : setNewFields) (Just [var newObjName])
   return $ L.PrefixExp . L.PEFunCall $ L.NormalFunCall (L.Paren fun) (L.Args [obj])
@@ -262,13 +262,13 @@ qualifiedToLua mn f (Qualified (Just (ModuleName [ProperName mn'])) a)
 qualifiedToLua mn f (Qualified (Just mn') a)
   | mn /= mn' =
       select (var $ moduleNameToLua mn')
-      (L.String . runIdent $ f a)
+      (string . runIdent $ f a)
 qualifiedToLua mn f (Qualified _ a) =
   var . identToLua $ f a
 
 
 foreignIdent :: Ident -> L.Exp
-foreignIdent ident = select (var "_foreign") (L.String $ runIdent ident)
+foreignIdent ident = select (var "_foreign") (string $ runIdent ident)
 
 
 -- | Generate code in the Lua AST for pattern match binders and guards
@@ -294,7 +294,7 @@ bindersToLua mn maybeSpan binders vals = do
     go _ _ _ = internalError "Invalid arguments to bindersToLua"
 
     failedPatternError :: [String] -> L.Exp
-    failedPatternError _ = L.String $ "Pattern match failure at " ++
+    failedPatternError _ = string $ "Pattern match failure at " ++
                            maybe "" displayStartEndPos maybeSpan
 
     guardsToLua :: Either [(Guard Ann, Expr Ann)] (Expr Ann) -> m [L.Stat]
@@ -353,11 +353,11 @@ literalToBinderLua _ varName done (NumericLiteral num) =
            Nothing ]
 literalToBinderLua _ varName done (CharLiteral c) =
   return $ [L.If
-            [(varIsEq varName (L.String [c]), L.Block done Nothing)]
+            [(varIsEq varName (string [c]), L.Block done Nothing)]
             Nothing ]
 literalToBinderLua _ varName done (StringLiteral s) =
   return $ [L.If
-            [(varIsEq varName (L.String s), L.Block done Nothing)]
+            [(varIsEq varName (string s), L.Block done Nothing)]
             Nothing ]
 literalToBinderLua _ varName done (BooleanLiteral True) =
   return $ [L.If
@@ -375,7 +375,7 @@ literalToBinderLua mn varName done (ObjectLiteral bs) = go done bs
       lua <- binderToLua mn propVar done'' binder
       return $
         L.LocalAssign [propVar]
-        (Just [select (var varName) (L.String prop)])
+        (Just [select (var varName) (string prop)])
         : lua
 literalToBinderLua mn varName done (ArrayLiteral bs) = do
   lua <- go done 1 bs
