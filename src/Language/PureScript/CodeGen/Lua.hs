@@ -312,12 +312,13 @@ binderToLua mn varName done (ConstructorBinder (_, _, _, Just IsNewtype) _ _ [b]
   binderToLua mn varName done b
 binderToLua mn varName done (ConstructorBinder (_, _, _, Just (IsConstructor ctorType fields)) _ ctor bs) = do
   lua <- go (zip3 [1..] fields bs) done
+  let Qualified _ ctor' = ctor
   return $ case ctorType of
     ProductType -> lua
     SumType ->
       let argCtor = selectS (var varName) "ctor"
       in [L.If
-          [(L.Binop L.EQ argCtor (qualifiedToLua mn (Ident. runProperName) ctor),
+          [(L.Binop L.EQ argCtor (string . runProperName $ ctor'),
             L.Block lua Nothing)] Nothing]
   where
     go :: [(Int, Ident, Binder Ann)] -> [L.Stat] -> m [L.Stat]
