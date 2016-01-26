@@ -19,6 +19,8 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Language.PureScript.CodeGen.Lua.Common
                        Language.PureScript.CodeGen.Lua.Optimizer
+                       Language.PureScript.CodeGen.Lua.Utils
+                       Language.PureScript.CodeGen.Lua.Subst
                        Language.PureScript.CodeGen.Lua
                        Language.PureScript.Make.Lua
   -- other-modules:       

@@ -2,8 +2,11 @@ module Language.PureScript.CodeGen.Lua.Optimizer (optimize) where
 
 import Data.Generics
 import Data.List(foldl')
+import qualified Data.Set as S
 
 import Language.PureScript.CodeGen.Lua.Common
+import Language.PureScript.CodeGen.Lua.Subst
+
 import qualified Language.Lua.Syntax as L
 
 applyAll :: [a -> a] -> a -> a
@@ -11,7 +14,59 @@ applyAll = foldl' (.) id
 
 
 optimize :: L.Block -> L.Block
-optimize = applyAll [removeReturnApps, inlineCommonOperators, removeDollars, inlineEffOps]
+optimize = applyAll [applyVars, applyVars', inlineEffOps, removeReturnApps,
+                     removeVarAsgns, removeDupAsgns, inlineCommonOperators,
+                     removeIfTrues, removeDollars]
+
+
+applyVars :: Data a => a -> a
+applyVars = everywhere (mkT applyVar)
+  where
+    applyVar
+      (L.Block stats (Just
+        [ L.PrefixExp (L.PEFunCall
+           (L.NormalFunCall
+            (L.Paren (L.EFunDef (L.FunBody args _ block)))
+            (L.Args vars))) ]))
+      | all isVar vars && length args == length vars =
+          let vars' = map getVar vars
+              L.Block stats' ret = substBlock' (zip args vars') block
+          in L.Block (stats ++ stats') ret
+    applyVar b = b
+
+    substBlock' :: [(L.Name, L.Name)] -> L.Block -> L.Block
+    substBlock' [] b = b
+    substBlock' ((r, l) : ss) b = substBlock' ss (runSubst 0 (substBlock r l b))
+
+
+applyVars' :: Data a => a -> a
+applyVars' = everywhere (mkT applyVar)
+  where
+    applyVar :: L.PrefixExp -> L.PrefixExp
+    applyVar
+      (L.PEFunCall (L.NormalFunCall
+        (L.Paren (L.EFunDef (L.FunBody args _ (L.Block [] (Just [exp])))))
+        (L.Args vars)))
+      | all isVar vars && length args == length vars =
+          let vars' = map getVar vars
+          in L.Paren (substExp' (zip args vars') exp)
+    applyVar e = e
+    
+    substExp' :: [(L.Name, L.Name)] -> L.Exp -> L.Exp
+    substExp' [] e = e
+    substExp' ((r, l) : ss) e = substExp' ss (runSubst 0 (substExp r l e))
+
+
+isVar :: L.Exp -> Bool
+isVar (L.PrefixExp L.PEVar{}) = True
+isVar (L.PrefixExp (L.Paren p)) = isVar p
+isVar _ = False
+
+getVar :: L.Exp -> L.Name
+getVar (L.PrefixExp (L.PEVar (L.VarName var))) = var
+getVar (L.PrefixExp (L.Paren e)) = getVar e
+getVar notAVar = error $ "getVar on a non-var: " ++ show notAVar
+
 
 -- | Replace `Prelude.$` calls with direct function applications.
 -- This assumes using standard Prelude.
@@ -25,6 +80,78 @@ removeDollars = everywhere (mkT removeDollarExp)
         (L.Args [arg2])))) =
         L.PrefixExp $ L.PEFunCall $ L.NormalFunCall (expToPexp arg1) $ L.Args [arg2]
     removeDollarExp exp = exp
+
+
+-- | Replace `if true then stats end` with `stats`. If `stats` has a return
+-- statement, then remove all following statements.
+removeIfTrues :: Data a => a -> a
+removeIfTrues = everywhere (mkT removeIfTrue)
+  where
+    removeIfTrue
+      b@(L.Block stats ret) =
+        case searchIfTrue stats of
+         Nothing -> b
+         Just (prevStats, ifBody, Left restStats) ->
+           -- `if true then stats end` found, without return statement in `stats`
+           L.Block (prevStats ++ ifBody ++ restStats) ret
+         Just (prevStats, ifBody, Right ret') ->
+           -- `if true then stats end` found, `stats` have a return statement
+           L.Block (prevStats ++ ifBody) (Just ret')
+
+    searchIfTrue [] = Nothing
+    searchIfTrue (L.If [(L.Bool True, L.Block ifBody Nothing)] Nothing : rest) =
+      return ([], ifBody, Left rest)
+    searchIfTrue (L.If [(L.Bool True, L.Block ifBody (Just ret))] Nothing : _) =
+      return ([], ifBody, Right ret)
+    searchIfTrue (stat : stats) = do
+      (prevs, ifBody, rest) <- searchIfTrue stats
+      return (stat : prevs, ifBody, rest)
+
+
+-- | In the codegen we never mutate a variable, so remove any reassignments
+-- of varibles in blocks.
+-- (multiple assignments of variables are introduced in codegen for pattern matching)
+removeDupAsgns :: Data a => a -> a
+removeDupAsgns = everywhere (mkT rmDupAsgns)
+  where
+    rmDupAsgns :: L.Block -> L.Block
+    rmDupAsgns (L.Block stats ret) = L.Block (iterStats S.empty stats) ret
+    
+    iterStats :: S.Set L.Name -> [L.Stat] -> [L.Stat]
+    iterStats names (stat@(L.LocalAssign [name] (Just [_])) : rest)
+      | name `S.member` names = iterStats names rest
+      | otherwise = stat : iterStats (S.insert name names) rest
+    iterStats names (stats : rest) = stats : iterStats names rest
+    iterStats _ [] = []
+
+
+-- | Replace variables assigned to another variables with their right-hand
+    -- sides.
+removeVarAsgns :: Data a => a -> a
+removeVarAsgns = everywhere (mkT rmVarAsgns)
+  where
+    rmVarAsgns :: L.Block -> L.Block
+    rmVarAsgns (L.Block stats ret) =
+      uncurry L.Block $ iterStats stats ((fmap . fmap $ removeVarAsgns) ret)
+
+    iterStats :: [L.Stat] -> Maybe [L.Exp] -> ([L.Stat], Maybe [L.Exp])
+    iterStats (stat@(L.LocalAssign [name] (Just [rhs])) : rest) rets
+      | isVar rhs = iterStats (map (subst name rhs) rest) ((fmap . fmap $ subst name rhs) rets)
+      | otherwise =
+          let (stats', rets') = iterStats rest rets
+          in (stat : stats', rets')
+    iterStats (stat : rest) rets =
+      let (stats', rets') = iterStats rest rets
+      in (stat : stats', rets')
+    iterStats [] rets = ([], rets)
+
+    subst :: Data a => L.Name -> L.Exp -> a -> a
+    subst var rhs = everywhere (mkT subst')
+      where
+        subst' pexp@(L.PEVar ((L.VarName var')))
+          | var == var' = expToPexp rhs
+          | otherwise   = pexp
+        subst' pexp = pexp
 
 
 -- | Remove redundant function application in `return (function () .. stats .. end)()`.
