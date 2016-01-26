@@ -17,7 +17,9 @@ import Language.PureScript.Errors
 import Language.PureScript.Options
 import Language.PureScript.Traversals (sndM)
 import qualified Language.PureScript.Constants as C
+
 import Language.PureScript.CodeGen.Lua.Common as Common
+import Language.PureScript.CodeGen.Lua.Optimizer
 
 import qualified Language.Lua.Syntax as L
 import qualified Language.Lua.PrettyPrinter as L
@@ -49,16 +51,15 @@ moduleToLua (Module coms mn imps exps foreigns decls) foreign_ =
                   (\\ [mn]) $ imps
     let decls' = renameModules mnLookup decls
     luaDecls <- traverse (bindToLua mn) decls'
-    optimized <- return luaDecls -- TODO: Optimizations
     let foreign' = L.LocalAssign ["_foreign"] (mkForeign <$> foreign_)
         mkForeign exp = [exp]
-        moduleBody = foreign' : luaImports ++ concat optimized
+        moduleBody = foreign' : luaImports ++ concat luaDecls
         foreignExps = intersect exps (map fst foreigns)
         standardExps = exps \\ foreignExps
         expPairs = map (string . runIdent &&& var . identToLua) standardExps
                    ++ map (string . runIdent &&& foreignIdent) foreignExps
         exps' = L.TableConst $ map (uncurry L.ExpField) expPairs
-    return $ L.Block moduleBody (Just [exps'])
+    return . optimize $ L.Block moduleBody (Just [exps'])
 
 
 -- | Extracts all declaration names from a binding group.
