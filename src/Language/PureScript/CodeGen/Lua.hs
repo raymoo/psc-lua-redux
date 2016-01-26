@@ -126,6 +126,10 @@ renameModules mnLookup binds =
 -- | Generate code in the Lua AST for a declaration
 bindToLua :: (MonadError MultipleErrors m, MonadSupply m, MonadReader Options m) =>
              ModuleName -> Bind Ann -> m [L.Stat]
+bindToLua mn (NonRec ident val@Constructor{}) = do
+  lua <- valueToLua mn val
+  let luaIdent = identToLua ident
+  return $ [L.LocalAssign [luaIdent] Nothing, L.Assign [L.VarName luaIdent] [lua]]
 bindToLua mn (NonRec ident val) = do
   lua <- valueToLua mn val
   return $ [L.LocalAssign [identToLua ident] (Just [lua])]
