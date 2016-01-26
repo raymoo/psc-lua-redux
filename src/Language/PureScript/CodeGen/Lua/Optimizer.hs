@@ -11,7 +11,87 @@ applyAll = foldl' (.) id
 
 
 optimize :: L.Block -> L.Block
-optimize = applyAll [inlineCommonOperators]
+optimize = applyAll [removeReturnApps, inlineCommonOperators, removeDollars, inlineEffOps]
+
+-- | Replace `Prelude.$` calls with direct function applications.
+-- This assumes using standard Prelude.
+removeDollars :: Data a => a -> a
+removeDollars = everywhere (mkT removeDollarExp)
+  where
+    removeDollarExp
+      (L.PrefixExp (L.PEFunCall (L.NormalFunCall
+        (L.PEFunCall (L.NormalFunCall (L.PEVar (L.Select (L.PEVar (L.VarName "Prelude")) (L.String "\"$\"")))
+                                      (L.Args [arg1])))
+        (L.Args [arg2])))) =
+        L.PrefixExp $ L.PEFunCall $ L.NormalFunCall (expToPexp arg1) $ L.Args [arg2]
+    removeDollarExp exp = exp
+
+
+-- | Remove redundant function application in `return (function () .. stats .. end)()`.
+removeReturnApps :: Data a => a -> a
+removeReturnApps = everywhere (mkT rmRet)
+  where
+    rmRet (L.Block stats (Just [L.PrefixExp
+            (L.PEFunCall (L.NormalFunCall (L.Paren (L.EFunDef (L.FunBody [] _ (L.Block stats' (Just rets)))))
+                                          (L.Args [])))])) =
+      L.Block (stats ++ stats') (Just rets)
+    rmRet b = b
+
+
+-- | Inline Eff monad operations.
+inlineEffOps :: Data a => a -> a
+inlineEffOps = everywhere (mkT iter)
+  where
+    iter :: L.Exp -> L.Exp
+
+    -- inline whileE
+    iter (L.PrefixExp (L.PEFunCall (L.NormalFunCall
+           (L.PEFunCall (L.NormalFunCall
+             (L.PEVar (L.Select (L.PEVar (L.VarName "Control_Monad_Eff")) (L.String "\"whileE\"")))
+             (L.Args [arg1])))
+           (L.Args [arg2])))) =
+      let body = L.While (funcall arg1 []) (L.Block [funcallStat arg2 []] Nothing)
+      in L.EFunDef $ L.FunBody [] False (L.Block [body] $ Just [])
+
+    -- inline untilE
+    iter (L.PrefixExp (L.PEFunCall (L.NormalFunCall
+           (L.PEVar (L.Select (L.PEVar (L.VarName "Control_Monad_Eff")) (L.String "\"untilE\"")))
+           (L.Args [arg])))) =
+      let body = L.While (L.Unop L.Not (funcall arg [])) (L.Block [] Nothing)
+      in L.EFunDef $ L.FunBody [] False (L.Block [body] $ Just [])
+
+    -- inline return and pure
+    iter (L.PrefixExp (L.PEFunCall (L.NormalFunCall
+             (L.PEFunCall (L.NormalFunCall
+               (L.PEVar (L.Select (L.PEVar (L.VarName "Prelude")) (L.String method)))
+               (L.Args [L.PrefixExp
+                 (L.PEVar (L.Select (L.PEVar (L.VarName "Control_Monad_Eff")) (L.String "\"applicativeEff\"")))
+               ])))
+             (L.Args [arg1]))))
+      | method `elem` ["\"return\"", "\"pure\""] =
+          L.EFunDef (L.FunBody [] False (L.Block [] (Just [arg1])))
+             
+
+    -- inline (>>=) and (>>)
+    iter e@(L.PrefixExp (L.PEFunCall (L.NormalFunCall
+             (L.PEFunCall (L.NormalFunCall
+               (L.PEFunCall (L.NormalFunCall
+                 (L.PEVar (L.Select (L.PEVar (L.VarName "Prelude")) (L.String "\">>=\"")))
+                 (L.Args [L.PrefixExp 
+                   (L.PEVar (L.Select (L.PEVar (L.VarName "Control_Monad_Eff")) (L.String "\"bindEff\"")))
+                 ])))
+               (L.Args [arg1])))
+             (L.Args [arg2])))) =
+      case arg2 of
+        L.EFunDef (L.FunBody ["_"] False (L.Block [] (Just [ret]))) ->
+          let body = [funcallStat arg1 []]
+          in L.EFunDef $ L.FunBody [] False (L.Block body (Just [funcall ret []]))
+        L.EFunDef (L.FunBody [argName] False (L.Block [] (Just [ret]))) ->
+          let body = [L.LocalAssign [argName] $ Just [funcall arg1 []]]
+          in L.EFunDef $ L.FunBody [] False (L.Block body (Just [funcall ret []]))
+        _ -> e
+
+    iter e = e
 
 
 inlineCommonOperators :: Data a => a -> a
