@@ -76,12 +76,13 @@ inlineEffOps = everywhere (mkT iter)
     iter e@(L.PrefixExp (L.PEFunCall (L.NormalFunCall
              (L.PEFunCall (L.NormalFunCall
                (L.PEFunCall (L.NormalFunCall
-                 (L.PEVar (L.Select (L.PEVar (L.VarName "Prelude")) (L.String "\">>=\"")))
+                 (L.PEVar (L.Select (L.PEVar (L.VarName "Prelude")) (L.String method)))
                  (L.Args [L.PrefixExp 
                    (L.PEVar (L.Select (L.PEVar (L.VarName "Control_Monad_Eff")) (L.String "\"bindEff\"")))
                  ])))
                (L.Args [arg1])))
-             (L.Args [arg2])))) =
+             (L.Args [arg2]))))
+      | method `elem` ["\"bind\"", "\">>=\""] =
       case arg2 of
         L.EFunDef (L.FunBody ["_"] False (L.Block [] (Just [ret]))) ->
           let body = [funcallStat arg1 []]
