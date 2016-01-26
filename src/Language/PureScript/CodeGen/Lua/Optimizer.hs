@@ -34,6 +34,8 @@ inlineCommonOperators' = applyAll
     , binary "semiringInt" "mul" L.Mul
     , binary "ringInt" "-" L.Sub
     , binary "ringInt" "sub" L.Sub
+    , binary "moduloSemiringInt" "mod" L.Mod
+    , binary "moduloSemiringInt" "%" L.Mod
 
     , binary "ordNumber" "<" L.LT
     , binary "ordNumber" ">" L.GT
